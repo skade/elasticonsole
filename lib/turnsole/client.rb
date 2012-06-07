@@ -1,5 +1,5 @@
 require 'thread'
-require 'heliotrope-client'
+require 'turnsole/elastictrope/client'
 
 ## all the methods here are asynchronous, except for ping!
 ## requests are queued and dispatched by the thread here. results are queued
@@ -10,32 +10,31 @@ class Client
 
   def initialize context, url
     @context = context
-    @client = HeliotropeClient.new url
+    @client = ElastictropeClient.new url
     @client_mutex = Mutex.new # we sometimes access client from the main thread, for synchronous calls
-    @q = Queue.new
-    @processing_queue_size = 0
   end
 
   def url; @client.url end
 
   def start!
-    @thread = start_thread!
+    #@thread = start_thread!
   end
 
   def stop!
-    @thread.kill if @thread
+    #@thread.kill if @thread
   end
 
   def pending_queue_size; @q.size end
-  def num_outstanding_requests; @q.size + @processing_queue_size end
+  def num_outstanding_requests; 0 end#@q.size + @processing_queue_size end
 
   ## the one method in here that is synchronous---good for pinging.
   def server_info; @client_mutex.synchronize { @client.info } end
 
   ## returns an array of ThreadSummary objects
   def search query, num, offset
-    threads = perform :search, :args => [query, num, offset]
-    threads.map { |t| ThreadSummary.new t }
+    threads = perform :search, :args => [query, num, offset] do |resp|
+      resp.map { |t| ThreadSummary.new t }
+    end
   end
 
   def threadinfo thread_id
@@ -115,73 +114,37 @@ class Client
 
   ## some methods we relay and set-ify the results
   %w(contacts labels prune_labels!).each do |m|
-    define_method(m) { Set.new perform(m.to_sym) }
+    define_method(m) do
+      perform(m.to_sym) do |resp|
+        Set.new resp
+      end
+    end
   end
 
 private
 
-  def perform cmd, opts={}
-    @q.push [cmd, opts, Fiber.current]
-    val = Fiber.yield
-    raise val if val.is_a? Exception
-    val
+  def perform cmd, opts={}, &op
+    f = Fiber.current
+    
+    req = request cmd, opts, &op
+    req.callback { f.resume(req.response) }
+    
+    Fiber.yield
   end
 
-  def perform_async cmd, opts={}
-    @q.push [cmd, opts, nil]
-    nil
+  def perform_async cmd, opts={}, &op
+    req = request cmd, opts, &op
+    req.callback { @context.ui.enqueue :server_response, req.response, opts[:on_success] if opts[:on_success] }
+    req
+  end
+
+  def request cmd, opts, &op
+    @context.ui.enqueue :network_event
+    req = @client.send(cmd, *opts[:args])
+    req.callback { req.response = op[req.response] } if op
+    req
   end
 
   def log; @context.log end
-
-  def start_thread!
-    Thread.new do
-      while true
-        cmd, opts, fiber = @q.pop
-        args = opts[:args] || []
-        pretty = "#{cmd}#{args.inspect}"[0, 150]
-        debug "sending to server: #{pretty}"
-        @context.ui.enqueue :network_event
-        @processing_queue_size += 1
-
-        #say_id = @context.screen.minibuf.say "loading #{pretty} ..."
-        #@context.ui.enqueue :redraw
-
-        startt = Time.now
-        results = begin
-          results = @client_mutex.synchronize { @client.send cmd, *args }
-          extra = case results
-            when Array; " => #{results.size} results"
-            when String; " => #{results.size} bytes"
-            else ""
-          end
-          info sprintf("remote call of %dms#{extra}: #{pretty}", (Time.now - startt) * 1000)
-          results
-        rescue Exception => e
-          e
-        end
-
-        @processing_queue_size -= 1
-        @context.ui.enqueue :network_event
-
-        if fiber
-          @context.ui.enqueue :server_response, results, fiber
-        else
-          if results.is_a? Exception
-            if opts[:on_failure]
-              @context.ui.enqueue :server_response, results, opts[:on_failure]
-            else
-              sadface = "uncaught exception from async call: #{results.inspect}"
-              @context.screen.minibuf.flash sadface
-
-              @context.log.warn "uncaught exception from async call: #{results.inspect}\n#{results.backtrace.join("\n")}"
-            end
-          else
-            @context.ui.enqueue :server_response, results, opts[:on_success] if opts[:on_success]
-          end
-        end
-      end
-    end
-  end
 end
 end

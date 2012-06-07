@@ -11,7 +11,7 @@ class UI
 
   def initialize context
     @context = context
-    @q = Queue.new # the main event queue
+    @q = EM::Queue.new # the main event queue
     @quit = false
 
     @event_listeners = Set.new
@@ -26,28 +26,21 @@ class UI
   def sigwinch_happened!; enqueue :sigwinch end
   def quit!
     @quit = true
-    enqueue :noop
+    enqueue :quit
   end
   def quit?; @quit end
   def redraw!; enqueue :redraw end
   def flash message; enqueue :flash, message end
-  def enqueue event, *args; @q.push [event, args] end
+  def enqueue event, *args
+    @q.push [event, args] 
+  end
 
   ## event pub/sub stuff
   def add_event_listener l; @event_listeners << l end
   def remove_event_listener l; @event_listeners.delete l end
   def broadcast source, event, *args; enqueue :broadcast, source, event, *args end
-
-  ## the main event loop. blocks. keep calling this until quit?
-  def step
-    @context.screen.draw!
-
-    event, args = begin
-      @q.pop
-    rescue Interrupt
-      [:interrupt, nil]
-    end
-
+  
+  def handle_event(event, args)
     case event
     when :interrupt
       f = spawn_fiber do
@@ -89,16 +82,34 @@ class UI
       # nothing to do
     when :noop
       # nothing to do
+    when :quit
+      :quit
     else
       raise "unknown event: #{event.inspect}"
     end
+  end
+  
+  ## the main event loop. blocks. keep calling this until quit?
+  def run_loop!
+    loop_fun = proc do |event, args|
+      @context.screen.draw! unless @quit
+      quit = handle_event(event, args)
+
+      if quit == :quit
+        EM.stop
+      else
+        @q.pop(&loop_fun)
+      end
+    end
+
+    @q.pop &loop_fun
   end
 
   def spawn_fiber
     Fiber.new do
       begin
         yield
-      rescue HeliotropeClient::Error => e
+      rescue ElastictropeClient::Error => e
         message = "Server error: #{e.message}."
         warn [message, e.backtrace[0..10].map { |l| "  "  + l }].flatten.join("\n")
         @context.screen.minibuf.flash message

@@ -1,0 +1,178 @@
+#!/usr/bin/env ruby
+
+require 'rubygems'
+require 'trollop'
+require "turnsole"
+require 'eventmachine'
+require 'em-http-request'
+
+HELIOTROPE_SUPPORTED_API_VERSION = "0.1"
+
+TURNSOLE_BIN_VERSION = "git" # change me on deploy
+unless Turnsole::VERSION == TURNSOLE_BIN_VERSION
+  $stderr.puts <<EOS
+Error: version mismatch!
+#{$0} is at version #{TURNSOLE_BIN_VERSION.inspect}.
+The turnsole libraries are at version #{Turnsole::VERSION.inspect}.
+
+Your development environment may be picking up code from a rubygems
+installation.
+
+If you're running from git with a commandline like
+
+  ruby -Ilib #{$0}
+
+try this instead:
+
+  RUBY_INVOCATION="ruby -Ilib" ruby -Ilib #{$0}
+
+You can also try `gem uninstall turnsole`.
+
+EOS
+  abort
+end
+
+if ENV['TURNSOLE_PROFILE']
+  require 'ruby-prof'
+  RubyProf.start
+end
+
+opts = Trollop::options do
+  version "sup v#{Turnsole::VERSION}"
+  banner <<EOS
+Turnsole is an ncurses-based email client. It is a frontend to the Heliotrope
+email service.
+
+Usage:
+  turnsole [options]
+
+Options are:
+EOS
+  opt :heliotrope_url, "Heliotrope server root URL (default: use value from config)", :type => String, :short => "u"
+  opt :list_hooks, "List all hooks and descriptions, and quit."
+  opt :check_first, "Check first to see if the server is up before doing anything else."
+  #opt :search, "Search for this query upon startup", :type => String
+  #opt :compose, "Compose message to this recipient upon startup", :type => String
+  #opt :subject, "When composing, use this subject", :type => String, :short => "j"
+
+  #conflicts :compose, :search
+end
+
+#Trollop::die :subject, "requires --compose" if opts[:subject] && !opts[:compose]
+
+turnsole = Turnsole::Turnsole.new
+
+if opts[:list_hooks]
+  turnsole.hooks.dump_hooks $stdout
+  exit
+end
+
+Thread.abort_on_exception = true # make debugging possible
+Thread.current.priority = 1 # keep ui responsive
+
+log = turnsole.logger
+log.force_message "welcome to turnsole! log level is set to '#{log.level}'"
+unless log.is_at_finest_logging_level?
+  log.force_message "for more verbose logging, restart with TURNSOLE_LOG_LEVEL=#{log.next_finest_logging_level}"
+end
+log.info "running under #{RUBY_DESCRIPTION}"
+
+turnsole.setup! opts.heliotrope_url
+
+if opts.check_first
+  server_error = begin
+    info = turnsole.client.server_info
+    if info["status"] != "up"
+      "server is not up. It reports that it is #{info["status"].inspect}."
+    elsif info["api_version"] != HELIOTROPE_SUPPORTED_API_VERSION
+      "server reports API version #{info["api_version"].inspect}. I expect #{HELIOTROPE_SUPPORTED_API_VERSION}. You probably need to upgrade turnsole."
+    else
+      log.debug "server is up"
+      nil
+    end
+  rescue HeliotropeClient::Error => e
+    "can't connect to server at #{turnsole.client.url}: #{e.message}."
+  end
+
+  if server_error
+    $stderr.puts "Error: #{server_error}"
+    $stderr.puts "Can't start turnsole."
+    abort
+  end
+end
+
+lmode = nil
+
+begin
+  EM.run do
+    EM.error_handler{ |e|
+       #puts "Error raised during event loop: #{e.message}"
+     }
+    Fiber.new { 
+      turnsole.start!
+      
+      ## the following signal handlers are run by default in the current thread,
+      ## which is also the thread processing the event queue. in order for the
+      ## queue to actually pop when these events are pushed, we need to enqueue
+      ## them from within in another thread. hence the insanity of the Thread.new
+      ## wrappers.
+      ##
+      ## it took me a long time to figure this out.
+      ##
+      ## additionally, in ruby 1.8, you have to have a sleep in there for this
+      ## to work. not sure why. it took a long time to figure that out too.
+      trap("TERM") { |x| turnsole.ui.quit! }
+      trap("WINCH") { |x| turnsole.ui.sigwinch_happened! }
+      
+      log.remove_sink $stderr
+      turnsole.screen.start_cursing!
+      turnsole.screen.start_input_handler!
+      turnsole.colors.setup!
+      
+      log.debug "initializing log buffer"
+      lmode = Turnsole::LogMode.new turnsole
+      lmode.on_kill { log.clear! } # clear contents of log when buffer is killed
+      log.add_sink lmode, :copy_current => true
+      
+      log.debug "initializing inbox buffer"
+      #imode = InboxMode.new
+      #ibuf = turnsole.ui.spawn "Inbox", imode
+      
+      textmode = Turnsole::TextMode.new turnsole, "hello human\nwelcome to sup\ni hope you like it!"
+      tmode = turnsole.screen.spawn "hello", textmode
+      
+      mode = Turnsole::InboxMode.new turnsole
+      tmode = turnsole.screen.spawn "inbox", mode
+      mode.load!
+      
+      log.debug "ready for interaction!"
+      
+      ## begin main loop
+      
+      turnsole.ui.run_loop!
+    }.resume
+  end
+rescue Exception => e
+  log.error "dying due to #{e.class}: #{e.message}\n#{e.backtrace[0..5].join("\n")}"
+  raise
+ensure
+  log.remove_sink lmode # buffer is gone by now
+  log.info "goodbye"
+  if turnsole.screen
+    turnsole.screen.stop_cursing!
+  end
+
+  log.add_sink $stderr
+
+  #while turnsole.client.num_outstanding_requests > 0
+    #puts "Waiting for #{turnsole.client.num_outstanding_requests} outstanding requests to server..."
+    #sleep 1
+  #end
+
+  turnsole.shutdown!
+
+  if (fn = ENV['TURNSOLE_PROFILE'])
+    result = RubyProf.stop
+    File.open(fn, 'w') { |io| RubyProf::CallTreePrinter.new(result).print(io) }
+  end
+end

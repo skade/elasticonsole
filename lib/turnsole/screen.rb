@@ -39,7 +39,7 @@ EOS
 
   def initialize context
     @context = context
-
+    
     @focus_buf = nil
     @bufs_by_title = {}
     @buffers = []
@@ -83,25 +83,72 @@ EOS
     @dirty = true
     @cursing = false
   end
+  
+  def start_input_handler!
+    context = @context
+    Curses.timeout = 0
+    handler = Module.new
+    handler.class_eval {
+      define_method :receive_data do |key|
+        key = key.bytes.first
 
-  def start_input_thread!
-    @input_thread ||= Thread.new do
-      while true
-        case(c = Ncurses.threadsafe_blocking_getch)
+        case key
         when 0
-          ## null byte -- do nothing
-        when nil
-          ## timeout -- do nothing
+          #null byte, do nothing
         when 410
           ## ncurses's way of telling us it's detected a refresh.  since
           ## we have our own sigwinch handler, we get this AFTER we've
           ## already processed the event, so we don't need to do
           ## anything.
+          ## Not sure whether this actuall happens with EVMA
         else
-          @context.ui.enqueue :keypress, c
+          context.ui.enqueue :keypress, key
         end
       end
+    }
+
+    EM.open_keyboard(handler)
+  end
+
+  def start_input_thread!
+    Curses.timeout = 0
+    EventMachine::PeriodicTimer.new(0.1) do
+      case(c = Ncurses.getch)
+      when 0
+        ## null byte -- do nothing
+      when nil
+        ## timeout -- do nothing
+      when 410
+        ## ncurses's way of telling us it's detected a refresh.  since
+        ## we have our own sigwinch handler, we get this AFTER we've
+        ## already processed the event, so we don't need to do
+        ## anything.
+      else
+        @context.ui.enqueue :keypress, c
+      end
     end
+
+    #EM.run {
+    #}
+    #@context.ui.enqueue :keypress, c
+    #
+    #@input_thread ||= Thread.new do
+    #  while true
+    #    (c = Ncurses.threadsafe_blocking_getch)
+    #    when 0
+    #      ## null byte -- do nothing
+    #    when nil
+    #      ## timeout -- do nothing
+    #    when 410
+    #      ## ncurses's way of telling us it's detected a refresh.  since
+    #      ## we have our own sigwinch handler, we get this AFTER we've
+    #      ## already processed the event, so we don't need to do
+    #      ## anything.
+    #    else
+    #      @context.ui.enqueue :keypress, c
+    #    end
+    #  end
+    #end
   end
 
   def stop_input_thread!
