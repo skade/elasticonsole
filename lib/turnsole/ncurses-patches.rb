@@ -62,11 +62,12 @@ module Ncurses
 
   module_function :rows, :cols, :curx, :threadsafe_blocking_getch, :safe_threadsafe_blocking_getch
 
+  $stderr.puts KEY_ENTER
   ## WHYYYYY must i redefine these?
   remove_const :KEY_ENTER
-  remove_const :KEY_CANCEL
+  #remove_const :KEY_CANCEL
 
-  KEY_ENTER = 10
+  KEY_ENTER = 13
   KEY_CANCEL = 7 # ctrl-g
   KEY_TAB = 9
 end

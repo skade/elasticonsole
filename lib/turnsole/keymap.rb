@@ -21,7 +21,7 @@ class Keymap
     when :ctrl_l then "\f"[0].ord
     when :ctrl_g then "\a"[0].ord
     when :tab then "\t"[0].ord
-    when :enter, :return then 10 #Curses::KEY_ENTER
+    when :enter, :return then 13 #Curses::KEY_ENTER
     else
       if k.is_a?(String) && k.length == 1
         k[0].ord

@@ -92,12 +92,12 @@ class UI
   ## the main event loop. blocks. keep calling this until quit?
   def run_loop!
     loop_fun = proc do |event, args|
-      @context.screen.draw! unless @quit
       quit = handle_event(event, args)
 
       if quit == :quit
         EM.stop
       else
+        @context.screen.draw! unless @quit
         @q.pop(&loop_fun)
       end
     end
