@@ -176,9 +176,10 @@ EOS
   ## have to change this. but it's not clear that we will ever actually
   ## do that.
   def roll_buffers
-    bufs = rollable_buffers
-    bufs.last.force_to_top = false
-    raise_to_front bufs.first
+    `tmux next-window -t #{ENV["TMUX_SESSION_NAME"]}`
+    #bufs = rollable_buffers
+    #bufs.last.force_to_top = false
+    #raise_to_front bufs.first
   end
 
   def roll_buffers_backwards

@@ -130,23 +130,21 @@ begin
       turnsole.colors.setup!
       
       log.debug "initializing log buffer"
+      lmode = Turnsole::LogMode.new turnsole
+      lmode.on_kill { log.clear! } # clear contents of log when buffer is killed
+
+      log.add_sink lmode, :copy_current => true
       
-      logger = File.open("/tmp/log", "w+")
-      logger.sync = true
-      #lmode = Turnsole::LogMode.new turnsole
-      #lmode.on_kill { log.clear! } # clear contents of log when buffer is killed
-      log.add_sink logger, :copy_current => true
-      #log.add_sink lmode, :copy_current => true
       log.debug "initializing inbox buffer"
       #imode = InboxMode.new
       #ibuf = turnsole.ui.spawn "Inbox", imode
       
-      textmode = Turnsole::TextMode.new turnsole, "hello human\nwelcome to sup\ni hope you like it!"
-      tmode = turnsole.screen.spawn "hello", textmode
+      #textmode = Turnsole::TextMode.new turnsole, "hello human\nwelcome to sup\ni hope you like it!"
+      #tmode = turnsole.screen.spawn "hello", textmode
       
-      mode = Turnsole::InboxMode.new turnsole
-      tmode = turnsole.screen.spawn "inbox", mode
-      mode.load!
+      #mode = Turnsole::InboxMode.new turnsole
+      #tmode = turnsole.screen.spawn "inbox", mode
+      #mode.load!
       
       log.debug "ready for interaction!"
       
