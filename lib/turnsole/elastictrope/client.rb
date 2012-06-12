@@ -114,15 +114,21 @@ private
   #end
 
   def post_json path, params={}
-    handle_errors do
-      curl = Curl::Easy.http_post URI.join(@url, path + ".json").to_s, encode_params(params)
-      if curl.response_code != 200
-        raise Error, "Unexpected HTTP response code #{@url.response_code} posting to #{curl.url}"
-      end
-      response = curl.body_str
-      response.force_encoding Encoding::UTF_8 if in_ruby19_hell?
-      JSON.parse response
-    end
+    uri = URI.join(@url, path + ".json").to_s
+    
+    http = EM::HttpRequest.new(uri).post :body => encode_params(params)
+    http.extend ElastictropeRequest
+    http.callback { http.response = JSON.parse(http.response) }
+    http
+    #handle_errors do
+    #  curl = Curl::Easy.http_post URI.join(@url, path + ".json").to_s, encode_params(params)
+    #  if curl.response_code != 200
+    #    raise Error, "Unexpected HTTP response code #{@url.response_code} posting to #{curl.url}"
+    #  end
+    #  response = curl.body_str
+    #  response.force_encoding Encoding::UTF_8 if in_ruby19_hell?
+    #  JSON.parse response
+    #end
   end
 
   def get_raw resource, params={}

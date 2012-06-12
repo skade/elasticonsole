@@ -8,6 +8,7 @@ then
 else
   tmux new-session -d -n inbox -s elasticonsole "ruby -I lib bin/elasticonsole-thread-view" 
   #tmux new-window -t elasticonsole -d -n log "ruby -I lib bin/elasticonsole-log-view" #2> test.log
+  tmux set -g status-left-length 30
   tmux new-window -t elasticonsole -d -n log "socat -u /tmp/log,ignoreeof,creat=1,unlink-close stdout"
   tmux attach-session -t elasticonsole
 fi

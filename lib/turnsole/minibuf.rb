@@ -48,7 +48,9 @@ class Minibuf
     force_draw! start_row
   end
 
-  def mark_dirty!; @mutex.synchronize { @dirty = true } end
+  def mark_dirty!
+    @dirty = true # no need for mutexes anymore, we are fully evented now
+  end
 
   def force_draw! start_row
     Ncurses.attrset @context.colors.color_for(:default)
@@ -153,7 +155,10 @@ class Minibuf
     return unless @textfield
     @textfield.deactivate!
     @textfield = nil
+    #@context.screen.mark_dirty! # for some reason activation blanks the whole fucking screen
+    
     mark_dirty!
+    @context.ui.redraw!
   end
 end
 end
